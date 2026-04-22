@@ -3,25 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ikea objects</title>
+  <title>ikea formations</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; overflow: hidden; cursor: none; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
     body { font-family: 'Segoe UI', Tahoma, sans-serif; }
 
     #bg { position: fixed; inset: 0; z-index: 0; }
     #c  { position: fixed; inset: 0; z-index: 1; }
-
-    #cursor {
-      position: fixed; z-index: 20;
-      width: 9px; height: 9px;
-      border-radius: 50%;
-      background: rgba(255,255,255,0.9);
-      box-shadow: 0 0 10px 3px rgba(255,255,255,0.5);
-      transform: translate(-50%, -50%);
-      pointer-events: none;
-      transition: opacity 0.3s;
-    }
 
     .badge {
       position: fixed; z-index: 10;
@@ -33,15 +22,26 @@
       letter-spacing: -0.01em;
       font-size: 1.15em;
       user-select: none; pointer-events: none;
+      transition: opacity 0.26s ease, transform 0.26s ease;
     }
-    #badge-main { bottom: 1.8em; left: 1.8em; }
+    #badge-formation {
+      bottom: 3.8em; left: 1.8em;
+    }
+    #badge-hint {
+      bottom: 1.8em; left: 1.8em;
+      opacity: 0.55;
+    }
+    .badge-enter {
+      opacity: 0;
+      transform: translateY(6px);
+    }
   </style>
 </head>
 <body>
   <div id="bg"></div>
   <canvas id="c"></canvas>
-  <div id="cursor"></div>
-  <div class="badge" id="badge-main">move your cursor</div>
+  <div class="badge" id="badge-formation">grid</div>
+  <div class="badge" id="badge-hint">press space to rearrange</div>
 
   <script type="importmap">
   { "imports": {
@@ -59,14 +59,10 @@
       {
         bgBase: '#cfe7f7',
         bgA: '#e5f3fa', bgB: '#b1def7', bgC: '#96c2ec',
-        obj: '#4a78c9', spec: '#b1def7',
-        hi: 0xe5f3fa, lo: 0x0f2f66,
       },
       {
         bgBase: '#c9bff0',
         bgA: '#dfd5ec', bgB: '#d9afdb', bgC: '#a49af2',
-        obj: '#8a6ed6', spec: '#e6cff0',
-        hi: 0xdfd5ec, lo: 0x3a1f6b,
       },
     ];
     const T = THEMES[Math.random() < 0.5 ? 0 : 1];
@@ -87,81 +83,157 @@
 
     const scene = new THREE.Scene();
     const cam = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 100);
-    cam.position.z = 10;
+    cam.position.set(0, 2, 14);
+    cam.lookAt(0, 0, 0);
 
     // ── Environment (IBL) ─────────────────────────────────────────────────
-    // RoomEnvironment provides neutral studio IBL so PBR materials read true to source
     const pmrem = new THREE.PMREMGenerator(renderer);
     scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     pmrem.dispose();
 
-    // ── Mouse → world ─────────────────────────────────────────────────────
-    const cursorEl = document.getElementById('cursor');
-    const mouse3 = new THREE.Vector3();
-    const _ray   = new THREE.Vector3();
-    let seenMouse = false;
+    // ── Formations ────────────────────────────────────────────────────────
+    const N = 9;
 
-    function screenToWorld(cx, cy) {
-      const nx = (cx / innerWidth)  *  2 - 1;
-      const ny = (cy / innerHeight) * -2 + 1;
-      _ray.set(nx, ny, 0.5).unproject(cam);
-      _ray.sub(cam.position).normalize();
-      const t = -cam.position.z / _ray.z;
-      return cam.position.clone().addScaledVector(_ray, t);
-    }
-
-    window.addEventListener('mousemove', e => {
-      cursorEl.style.left = e.clientX + 'px';
-      cursorEl.style.top  = e.clientY + 'px';
-      mouse3.copy(screenToWorld(e.clientX, e.clientY));
-      if (!seenMouse) {
-        nodePos.forEach(p => p.copy(mouse3));
-        seenMouse = true;
-      }
-    });
-
-    window.addEventListener('touchmove', e => {
-      const t = e.touches[0];
-      cursorEl.style.left = t.clientX + 'px';
-      cursorEl.style.top  = t.clientY + 'px';
-      mouse3.copy(screenToWorld(t.clientX, t.clientY));
-      if (!seenMouse) {
-        nodePos.forEach(p => p.copy(mouse3));
-        seenMouse = true;
-      }
-    }, { passive: true });
-
-    // ── Physics ───────────────────────────────────────────────────────────
-    // GLB files — extend this array to add more objects
-    const FILES = [
-      'trainer.glb',
-      'open_book.glb',
-      'football.glb',
-      'clothes_hang.glb',
-      'bucket_hat.glb',
-      'iron.glb',
-      'pan.glb',
+    // Returns array of N {x, y} positions in world units
+    const FORMATIONS = [
+      {
+        name: 'grid',
+        positions() {
+          const cols = 3, rows = 3, sx = 3.2, sy = 3.0;
+          return Array.from({ length: N }, (_, i) => ({
+            x: (i % cols - 1) * sx,
+            y: (Math.floor(i / cols) - 1) * -sy,
+          }));
+        },
+      },
+      {
+        name: 'circle',
+        positions() {
+          return Array.from({ length: N }, (_, i) => {
+            const a = (i / N) * Math.PI * 2 - Math.PI / 2;
+            return { x: Math.cos(a) * 4.8, y: Math.sin(a) * 3.2 };
+          });
+        },
+      },
+      {
+        name: 'arc',
+        positions() {
+          return Array.from({ length: N }, (_, i) => {
+            const t = (i / (N - 1)) * Math.PI;
+            return { x: (i - (N - 1) / 2) * 1.55, y: Math.sin(t) * 2.8 - 1.4 };
+          });
+        },
+      },
+      {
+        name: 'diamond',
+        positions() {
+          const pts = [
+            [0, 3.2],
+            [-2.2, 1.6], [2.2, 1.6],
+            [-4.0, 0],   [0, 0],    [4.0, 0],
+            [-2.2,-1.6], [2.2,-1.6],
+            [0,-3.2],
+          ];
+          return pts.map(([x, y]) => ({ x, y }));
+        },
+      },
+      {
+        name: 'cross',
+        positions() {
+          return [
+            { x:  0,    y:  3.2 },
+            { x:  0,    y:  1.6 },
+            { x:  0,    y:  0   },
+            { x:  0,    y: -1.6 },
+            { x:  0,    y: -3.2 },
+            { x: -3.2,  y:  0   },
+            { x: -1.6,  y:  0   },
+            { x:  1.6,  y:  0   },
+            { x:  3.2,  y:  0   },
+          ];
+        },
+      },
+      {
+        name: 'spiral',
+        positions() {
+          return Array.from({ length: N }, (_, i) => {
+            const a = i * 0.85;
+            const r = 0.9 + i * 0.52;
+            return { x: Math.cos(a) * r, y: Math.sin(a) * r * 0.65 };
+          });
+        },
+      },
+      {
+        name: 'staggered',
+        positions() {
+          return Array.from({ length: N }, (_, i) => {
+            const col = i % 3;
+            const row = Math.floor(i / 3);
+            return {
+              x: (col - 1) * 3.4 + (row % 2 === 1 ? 1.7 : 0),
+              y: (row - 1) * -2.8,
+            };
+          });
+        },
+      },
+      {
+        name: 'line',
+        positions() {
+          return Array.from({ length: N }, (_, i) => ({
+            x: (i - (N - 1) / 2) * 1.55,
+            y: 0,
+          }));
+        },
+      },
+      {
+        name: 'v-shape',
+        positions() {
+          return Array.from({ length: N }, (_, i) => {
+            const mid = (N - 1) / 2;
+            const dist = Math.abs(i - mid);
+            return {
+              x: (i - mid) * 1.6,
+              y: -dist * 1.3 + 2.6,
+            };
+          });
+        },
+      },
     ];
-    const N   = FILES.length;
-    const K   = [20, 17, 15, 13, 11, 9, 8];    // spring stiffness per node (first = most responsive)
-    const DAMP_K = 6;                   // velocity damping coefficient
-    const SEP    = 0.7;                // minimum separation between nodes (world units)
 
-    const nodePos = Array.from({ length: N }, () => new THREE.Vector3());
-    const nodeVel = Array.from({ length: N }, () => new THREE.Vector3());
-    const _tmp = new THREE.Vector3();
+    let formationIdx = 0;
+    let targets = FORMATIONS[0].positions();
 
-    // ── 3D objects ────────────────────────────────────────────────────────
+    // ── GLB Loading ───────────────────────────────────────────────────────
+    const FILES = [
+      'commode_ikea_hemnes.glb',
+      'ikea_alex_drawer_unit.glb',
+      'ikea_billy_small.glb',
+      'ikea_hemnes_dresser.glb',
+      'ikea_kallax.glb',
+      'ikea_kallax_77x77.glb',
+      'ikea_kallx147x147.glb',
+      'kuggis_series_box_-_ikea.glb',
+      'tobias_chair_ikea.glb',
+    ];
+
     const pivots = Array.from({ length: N }, () => {
       const g = new THREE.Group();
       scene.add(g);
       return g;
     });
 
+    // Per-object spring state
+    const curPos  = Array.from({ length: N }, () => new THREE.Vector2());
+    const curVel  = Array.from({ length: N }, () => new THREE.Vector2());
+    const rotY    = new Float32Array(N);
+    const rotYVel = new Float32Array(N);
+
+    const loaded = new Array(N).fill(false);
+
     function normalise(obj) {
       const box = new THREE.Box3().setFromObject(obj);
       const sz  = box.getSize(new THREE.Vector3());
-      const s   = 1.15 / Math.max(sz.x, sz.y, sz.z);
+      const s   = 1.5 / Math.max(sz.x, sz.y, sz.z);
       obj.scale.setScalar(s);
       const ctr = box.getCenter(new THREE.Vector3()).multiplyScalar(s);
       obj.position.sub(ctr);
@@ -170,10 +242,66 @@
 
     const loader = new GLTFLoader();
     FILES.forEach((file, i) => {
-      loader.load(`./objects/${file}`, gltf => {
+      loader.load(`./furniture/${file}`, gltf => {
         normalise(gltf.scene);
         pivots[i].add(gltf.scene);
+        // Scatter start positions off-screen, then spring to formation
+        curPos[i].set((Math.random() - 0.5) * 20, (Math.random() - 0.5) * 12);
+        loaded[i] = true;
       });
+    });
+
+    // ── Space → next formation ────────────────────────────────────────────
+    const badgeFormation = document.getElementById('badge-formation');
+
+    function nextFormation() {
+      formationIdx = (formationIdx + 1) % FORMATIONS.length;
+      const f = FORMATIONS[formationIdx];
+      targets = f.positions();
+
+      // Shuffle which object goes to which slot for variety
+      const order = Array.from({ length: N }, (_, i) => i);
+      for (let i = N - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [order[i], order[j]] = [order[j], order[i]];
+      }
+      const shuffledTargets = order.map(o => targets[o]);
+      targets = shuffledTargets;
+
+      // Staggered velocity kick toward new target for each object
+      targets.forEach((tgt, i) => {
+        setTimeout(() => {
+          const dx = tgt.x - curPos[i].x;
+          const dy = tgt.y - curPos[i].y;
+          curVel[i].x += dx * 0.25;
+          curVel[i].y += dy * 0.25;
+        }, i * 40);
+      });
+
+      // Badge transition
+      badgeFormation.classList.add('badge-enter');
+      requestAnimationFrame(() => {
+        badgeFormation.style.opacity = '0';
+        badgeFormation.style.transform = 'translateY(6px)';
+        setTimeout(() => {
+          badgeFormation.textContent = f.name;
+          badgeFormation.style.opacity = '';
+          badgeFormation.style.transform = '';
+          badgeFormation.classList.remove('badge-enter');
+        }, 130);
+      });
+    }
+
+    window.addEventListener('keydown', e => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        nextFormation();
+      }
+    });
+
+    // Tap anywhere on mobile
+    window.addEventListener('touchend', e => {
+      if (e.changedTouches.length > 0) nextFormation();
     });
 
     // ── Resize ────────────────────────────────────────────────────────────
@@ -184,6 +312,11 @@
     });
 
     // ── Render loop ───────────────────────────────────────────────────────
+    const SPRING_K  = 5.5;
+    const DAMP      = 5.0;
+    const ROT_K     = 2.2;
+    const ROT_DAMP  = 3.5;
+
     let prevT = performance.now();
     let elapsed = 0;
 
@@ -194,53 +327,47 @@
       prevT = now;
       elapsed += dt;
 
-      // Spring-chain physics (frame-rate independent)
-      const damp = Math.exp(-DAMP_K * dt);
+      const damp = Math.exp(-DAMP * dt);
+      const rotDamp = Math.exp(-ROT_DAMP * dt);
+
       for (let i = 0; i < N; i++) {
-        const tgt = i === 0 ? mouse3 : nodePos[i - 1];
-        _tmp.subVectors(tgt, nodePos[i]).multiplyScalar(K[i] * dt);
-        nodeVel[i].add(_tmp).multiplyScalar(damp);
-        nodePos[i].addScaledVector(nodeVel[i], dt);
-      }
+        if (!loaded[i]) continue;
 
-      // Enforce minimum separation so objects stay spread in an arc
-      for (let pass = 0; pass < 3; pass++) {
-        for (let i = 1; i < N; i++) {
-          _tmp.subVectors(nodePos[i], nodePos[i - 1]);
-          const d = _tmp.length();
-          if (d < SEP && d > 1e-5) {
-            const push = (SEP - d) * 0.5;
-            _tmp.normalize().multiplyScalar(push);
-            nodePos[i].add(_tmp);
-            nodePos[i - 1].sub(_tmp);
-          }
-        }
-      }
+        // Spring toward target
+        const tgt = targets[i];
+        const ax = (tgt.x - curPos[i].x) * SPRING_K;
+        const ay = (tgt.y - curPos[i].y) * SPRING_K;
 
-      // Animate each pivot
-      for (let i = 0; i < N; i++) {
-        const p = pivots[i];
-        const v = nodeVel[i];
+        curVel[i].x = (curVel[i].x + ax * dt) * damp;
+        curVel[i].y = (curVel[i].y + ay * dt) * damp;
+        curPos[i].x += curVel[i].x * dt;
+        curPos[i].y += curVel[i].y * dt;
 
-        // Position: node position + sinusoidal breathing
-        p.position.set(
-          nodePos[i].x + Math.cos(elapsed * 1.1 + i * 0.85) * 0.045,
-          nodePos[i].y + Math.sin(elapsed * 1.3 + i * 1.15) * 0.08,
-          nodePos[i].z - i * 0.12   // slight depth stagger
+        // Gentle idle wobble
+        const wobX = Math.cos(elapsed * 0.9 + i * 0.7) * 0.04;
+        const wobY = Math.sin(elapsed * 1.1 + i * 1.1) * 0.06;
+
+        pivots[i].position.set(
+          curPos[i].x + wobX,
+          curPos[i].y + wobY,
+          -i * 0.08
         );
 
-        // Tilt into direction of travel
-        const rx = THREE.MathUtils.clamp(-v.y * 0.1, -0.35, 0.35);
-        const rz = THREE.MathUtils.clamp(-v.x * 0.1, -0.35, 0.35);
-        p.rotation.x += (rx - p.rotation.x) * 0.14;
-        p.rotation.z += (rz - p.rotation.z) * 0.14;
+        // Slow continuous Y rotation + spring toward upright on X/Z tilt
+        const targetRotY = elapsed * 0.3 + i * (Math.PI * 2 / N);
+        rotYVel[i] = (rotYVel[i] + (targetRotY - rotY[i]) * ROT_K * dt) * rotDamp;
+        rotY[i] += rotYVel[i] * dt;
 
-        // Continuous slow spin so we see all sides
-        p.rotation.y = elapsed * 0.35 + i * (Math.PI * 2 / N);
+        const speed = Math.sqrt(curVel[i].x ** 2 + curVel[i].y ** 2);
+        const rx = THREE.MathUtils.clamp(-curVel[i].y * 0.06, -0.3, 0.3);
+        const rz = THREE.MathUtils.clamp(-curVel[i].x * 0.06, -0.3, 0.3);
 
-        // Subtle scale pulse on speed
-        const spd = v.length();
-        p.scale.setScalar(1 + Math.min(spd * 0.025, 0.12));
+        pivots[i].rotation.x += (rx - pivots[i].rotation.x) * 0.12;
+        pivots[i].rotation.y = elapsed * 0.3 + i * (Math.PI * 2 / N);
+        pivots[i].rotation.z += (rz - pivots[i].rotation.z) * 0.12;
+
+        // Scale pulse on movement
+        pivots[i].scale.setScalar(1 + Math.min(speed * 0.018, 0.1));
       }
 
       renderer.render(scene, cam);
