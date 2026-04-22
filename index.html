@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ikea objects</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; cursor: none; }
+    body { font-family: 'Segoe UI', Tahoma, sans-serif; }
+
+    #bg { position: fixed; inset: 0; z-index: 0; }
+    #c  { position: fixed; inset: 0; z-index: 1; }
+
+    #cursor {
+      position: fixed; z-index: 20;
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      background: rgba(255,255,255,0.9);
+      box-shadow: 0 0 10px 3px rgba(255,255,255,0.5);
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      transition: opacity 0.3s;
+    }
+
+    .badge {
+      position: fixed; z-index: 10;
+      background: #fff; color: #000;
+      font-weight: 900; border-radius: 0.5em;
+      padding: 0.15em 0.5em;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.10);
+      text-transform: lowercase; line-height: 1.1;
+      letter-spacing: -0.01em;
+      font-size: 1.15em;
+      user-select: none; pointer-events: none;
+    }
+    #badge-main { bottom: 1.8em; left: 1.8em; }
+  </style>
+</head>
+<body>
+  <div id="bg"></div>
+  <canvas id="c"></canvas>
+  <div id="cursor"></div>
+  <div class="badge" id="badge-main">move your cursor</div>
+
+  <script type="importmap">
+  { "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }}</script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+    // ── Themes ────────────────────────────────────────────────────────────
+    const THEMES = [
+      {
+        bgBase: '#cfe7f7',
+        bgA: '#e5f3fa', bgB: '#b1def7', bgC: '#96c2ec',
+        obj: '#4a78c9', spec: '#b1def7',
+        hi: 0xe5f3fa, lo: 0x0f2f66,
+      },
+      {
+        bgBase: '#c9bff0',
+        bgA: '#dfd5ec', bgB: '#d9afdb', bgC: '#a49af2',
+        obj: '#8a6ed6', spec: '#e6cff0',
+        hi: 0xdfd5ec, lo: 0x3a1f6b,
+      },
+    ];
+    const T = THEMES[Math.random() < 0.5 ? 0 : 1];
+
+    document.getElementById('bg').style.background =
+      `radial-gradient(ellipse 60% 70% at 12% 25%, ${T.bgA} 0%, transparent 65%),` +
+      `radial-gradient(ellipse 55% 65% at 85% 30%, ${T.bgC} 0%, transparent 70%),` +
+      `radial-gradient(ellipse 65% 55% at 70% 95%, ${T.bgB} 0%, transparent 70%),` +
+      T.bgBase;
+
+    // ── Renderer ──────────────────────────────────────────────────────────
+    const canvas = document.getElementById('c');
+    const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    const scene = new THREE.Scene();
+    const cam = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 100);
+    cam.position.z = 10;
+
+    // ── Lights ────────────────────────────────────────────────────────────
+    scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+
+    const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+    sun.position.set(5, 8, 6);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.camera.near = 0.5;
+    sun.shadow.camera.far = 30;
+    scene.add(sun);
+
+    scene.add(new THREE.HemisphereLight(T.hi, T.lo, 0.5));
+
+    const gnd = new THREE.Mesh(
+      new THREE.PlaneGeometry(50, 50),
+      new THREE.ShadowMaterial({ opacity: 0.07 })
+    );
+    gnd.rotation.x = -Math.PI / 2;
+    gnd.position.y = -2.5;
+    gnd.receiveShadow = true;
+    scene.add(gnd);
+
+    // ── Mouse → world ─────────────────────────────────────────────────────
+    const cursorEl = document.getElementById('cursor');
+    const mouse3 = new THREE.Vector3();
+    const _ray   = new THREE.Vector3();
+    let seenMouse = false;
+
+    function screenToWorld(cx, cy) {
+      const nx = (cx / innerWidth)  *  2 - 1;
+      const ny = (cy / innerHeight) * -2 + 1;
+      _ray.set(nx, ny, 0.5).unproject(cam);
+      _ray.sub(cam.position).normalize();
+      const t = -cam.position.z / _ray.z;
+      return cam.position.clone().addScaledVector(_ray, t);
+    }
+
+    window.addEventListener('mousemove', e => {
+      cursorEl.style.left = e.clientX + 'px';
+      cursorEl.style.top  = e.clientY + 'px';
+      mouse3.copy(screenToWorld(e.clientX, e.clientY));
+      if (!seenMouse) {
+        nodePos.forEach(p => p.copy(mouse3));
+        seenMouse = true;
+      }
+    });
+
+    window.addEventListener('touchmove', e => {
+      const t = e.touches[0];
+      cursorEl.style.left = t.clientX + 'px';
+      cursorEl.style.top  = t.clientY + 'px';
+      mouse3.copy(screenToWorld(t.clientX, t.clientY));
+      if (!seenMouse) {
+        nodePos.forEach(p => p.copy(mouse3));
+        seenMouse = true;
+      }
+    }, { passive: true });
+
+    // ── Physics ───────────────────────────────────────────────────────────
+    // GLB files — extend this array to add more objects
+    const FILES = [
+      'trainer.glb',
+      'open_book.glb',
+      'football.glb',
+      'clothes_hang.glb',
+      'bucket_hat.glb',
+    ];
+    const N   = FILES.length;
+    const K   = [15, 11, 8, 6, 4.5];   // spring stiffness per node (first = most responsive)
+    const DAMP_K = 6;                   // velocity damping coefficient
+    const SEP    = 1.35;               // minimum separation between nodes (world units)
+
+    const nodePos = Array.from({ length: N }, (_, i) =>
+      new THREE.Vector3(i * -1.5, 0, 0));
+    const nodeVel = Array.from({ length: N }, () => new THREE.Vector3());
+    const _tmp = new THREE.Vector3();
+
+    // ── 3D objects ────────────────────────────────────────────────────────
+    const pivots = Array.from({ length: N }, () => {
+      const g = new THREE.Group();
+      scene.add(g);
+      return g;
+    });
+
+    function makeMat() {
+      return new THREE.MeshPhongMaterial({
+        color:    new THREE.Color(T.obj),
+        specular: new THREE.Color(T.spec),
+        shininess: 28,
+        flatShading: true,
+      });
+    }
+
+    function normaliseAndMaterial(obj) {
+      const box = new THREE.Box3().setFromObject(obj);
+      const sz  = box.getSize(new THREE.Vector3());
+      const s   = 1.15 / Math.max(sz.x, sz.y, sz.z);
+      obj.scale.setScalar(s);
+      const ctr = box.getCenter(new THREE.Vector3()).multiplyScalar(s);
+      obj.position.sub(ctr);
+      obj.traverse(c => {
+        if (c.isMesh) {
+          c.castShadow = true;
+          c.material = makeMat();
+        }
+      });
+    }
+
+    // Fallback geometry set (used if a GLB fails to load)
+    const FB = [
+      new THREE.BoxGeometry(0.9, 0.9, 0.9),
+      new THREE.SphereGeometry(0.55, 7, 5),
+      new THREE.ConeGeometry(0.5, 1.0, 7),
+      new THREE.TorusGeometry(0.4, 0.18, 7, 14),
+      new THREE.OctahedronGeometry(0.62, 0),
+    ];
+
+    const loader = new GLTFLoader();
+    FILES.forEach((file, i) => {
+      loader.load(
+        `./objects/${file}`,
+        gltf => {
+          normaliseAndMaterial(gltf.scene);
+          pivots[i].add(gltf.scene);
+        },
+        undefined,
+        () => {
+          // Fallback: flat-shaded primitive in theme colour
+          const m = new THREE.Mesh(FB[i % FB.length], makeMat());
+          m.castShadow = true;
+          pivots[i].add(m);
+        }
+      );
+    });
+
+    // ── Resize ────────────────────────────────────────────────────────────
+    window.addEventListener('resize', () => {
+      cam.aspect = innerWidth / innerHeight;
+      cam.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+
+    // ── Render loop ───────────────────────────────────────────────────────
+    let prevT = performance.now();
+    let elapsed = 0;
+
+    (function tick(now) {
+      requestAnimationFrame(tick);
+
+      const dt = Math.min((now - prevT) / 1000, 0.05);
+      prevT = now;
+      elapsed += dt;
+
+      // Spring-chain physics (frame-rate independent)
+      const damp = Math.exp(-DAMP_K * dt);
+      for (let i = 0; i < N; i++) {
+        const tgt = i === 0 ? mouse3 : nodePos[i - 1];
+        _tmp.subVectors(tgt, nodePos[i]).multiplyScalar(K[i] * dt);
+        nodeVel[i].add(_tmp).multiplyScalar(damp);
+        nodePos[i].addScaledVector(nodeVel[i], dt);
+      }
+
+      // Enforce minimum separation so objects stay spread in an arc
+      for (let pass = 0; pass < 3; pass++) {
+        for (let i = 1; i < N; i++) {
+          _tmp.subVectors(nodePos[i], nodePos[i - 1]);
+          const d = _tmp.length();
+          if (d < SEP && d > 1e-5) {
+            const push = (SEP - d) * 0.5;
+            _tmp.normalize().multiplyScalar(push);
+            nodePos[i].add(_tmp);
+            nodePos[i - 1].sub(_tmp);
+          }
+        }
+      }
+
+      // Animate each pivot
+      for (let i = 0; i < N; i++) {
+        const p = pivots[i];
+        const v = nodeVel[i];
+
+        // Position: node position + sinusoidal breathing
+        p.position.set(
+          nodePos[i].x + Math.cos(elapsed * 1.1 + i * 0.85) * 0.045,
+          nodePos[i].y + Math.sin(elapsed * 1.3 + i * 1.15) * 0.08,
+          nodePos[i].z - i * 0.12   // slight depth stagger
+        );
+
+        // Tilt into direction of travel
+        const rx = THREE.MathUtils.clamp(-v.y * 0.1, -0.35, 0.35);
+        const rz = THREE.MathUtils.clamp(-v.x * 0.1, -0.35, 0.35);
+        p.rotation.x += (rx - p.rotation.x) * 0.14;
+        p.rotation.z += (rz - p.rotation.z) * 0.14;
+
+        // Continuous slow spin so we see all sides
+        p.rotation.y = elapsed * 0.35 + i * (Math.PI * 2 / N);
+
+        // Subtle scale pulse on speed
+        const spd = v.length();
+        p.scale.setScalar(1 + Math.min(spd * 0.025, 0.12));
+      }
+
+      renderer.render(scene, cam);
+    })(performance.now());
+  </script>
+</body>
+</html>
