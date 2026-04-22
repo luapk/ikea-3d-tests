@@ -7,7 +7,6 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; overflow: hidden; cursor: none; }
-
     #bg {
       position: fixed; inset: 0; z-index: 0;
       background:
@@ -17,7 +16,6 @@
         #c9bff0;
     }
     canvas { position: fixed; inset: 0; z-index: 1; }
-
     .badge {
       position: fixed; z-index: 10;
       background: #fff; color: #000; font-weight: 900;
@@ -29,7 +27,6 @@
     }
     #hud-score { font-size: 2.5em; top: 1.2em; right: 1.5em; }
     #hud-level { font-size: 1.2em; top: 1.2em; left: 1.5em; }
-
     #overlay {
       position: fixed; inset: 0; z-index: 20;
       display: flex; flex-direction: column;
@@ -46,8 +43,7 @@
       cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,.1);
       text-transform: lowercase; letter-spacing: -.01em; font-family: inherit;
     }
-    .ov-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 10px rgba(0,0,0,.13); }
-
+    .ov-btn:hover { transform: translateY(-1px); }
     #cursor {
       position: fixed; z-index: 30; width: 8px; height: 8px; border-radius: 50%;
       background: rgba(255,255,255,.9); box-shadow: 0 0 8px 2px rgba(255,255,255,.5);
@@ -61,10 +57,9 @@
   <div class="badge" id="hud-score">0</div>
   <div class="badge" id="hud-level">level 1</div>
   <div id="cursor"></div>
-
   <div id="overlay">
     <div class="ov-title">storage crunch</div>
-    <div class="ov-sub">slide the crate to catch falling objects. click to drop instantly.</div>
+    <div class="ov-sub">slide the crate under falling objects. click to drop instantly.</div>
     <button class="ov-btn" id="btn-start">start</button>
   </div>
 
@@ -79,12 +74,10 @@
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
-    // ── Game constants ────────────────────────────────────────────────────
-    const COLS = 6;
-    const ROWS = 11; // ceiling height (row 10 = game over)
-    const CELL = 1;
+    // ── Constants ─────────────────────────────────────────────────────────
+    const COLS = 4;   // fewer, bigger columns
+    const ROWS = 10;
 
-    // w/h in grid cells; fallMult < 1 = slower
     const DEFS = {
       book:    { glb:'open_book.glb',    w:1, h:1, fallMult:1.0 },
       shoe:    { glb:'trainer.glb',      w:1, h:1, fallMult:1.0 },
@@ -95,11 +88,12 @@
       clothes: { glb:'clothes_hang.glb', w:2, h:2, fallMult:0.85 },
     };
 
+    // msPerRow: how many ms to drop one grid row
     const LEVELS = [
-      { msPerRow:950,  types:['book','shoe','hat'] },
-      { msPerRow:780,  types:['book','shoe','hat','iron','football'] },
-      { msPerRow:620,  types:['book','shoe','hat','iron','football','pan'] },
-      { msPerRow:480,  types:Object.keys(DEFS) },
+      { msPerRow:240,  types:['book','shoe','hat'] },
+      { msPerRow:180,  types:['book','shoe','hat','iron','football'] },
+      { msPerRow:130,  types:['book','shoe','hat','iron','football','pan'] },
+      { msPerRow: 90,  types:Object.keys(DEFS) },
     ];
 
     // ── Renderer ──────────────────────────────────────────────────────────
@@ -110,111 +104,92 @@
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NoToneMapping;
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     const scene = new THREE.Scene();
 
-    // ── Isometric orthographic camera ─────────────────────────────────────
-    const VIEW = 7; // half-height of ortho frustum in world units
-    const cam = new THREE.OrthographicCamera(
-      -VIEW * (innerWidth/innerHeight), VIEW * (innerWidth/innerHeight),
-      VIEW, -VIEW, 0.1, 200
-    );
-    // Classic isometric: 45° yaw, ~35° pitch
-    const ISO_DIST = 30;
-    const ISO_YAW  = Math.PI / 4;
-    const ISO_PITCH = Math.atan(1 / Math.SQRT2); // 35.26°
-    const ROOM_CX = COLS / 2;
-    const ROOM_CY = ROWS / 2;
-    cam.position.set(
-      ROOM_CX + ISO_DIST * Math.cos(ISO_PITCH) * Math.sin(ISO_YAW),
-      ROOM_CY + ISO_DIST * Math.sin(ISO_PITCH) - 1,
-      ISO_DIST * Math.cos(ISO_PITCH) * Math.cos(ISO_YAW)
-    );
-    cam.lookAt(ROOM_CX, ROOM_CY - 1, 0);
+    // ── Camera ────────────────────────────────────────────────────────────
+    // Perspective, mildly elevated — not full isometric so columns read clearly
+    const cam = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 200);
+    const CX = COLS / 2;
+    const CY = ROWS / 2;
+    cam.position.set(CX + 3.5, CY + 5, 13);
+    cam.lookAt(CX - 0.5, CY - 1.5, 0);
 
-    // ── Lighting + IBL ────────────────────────────────────────────────────
+    // ── Lighting ──────────────────────────────────────────────────────────
     const pmrem = new THREE.PMREMGenerator(renderer);
     scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     pmrem.dispose();
     scene.add(new THREE.AmbientLight(0xffffff, 2.5));
     const sun = new THREE.DirectionalLight(0xffffff, 0.4);
-    sun.position.set(6, 12, 8); sun.castShadow = true;
-    sun.shadow.mapSize.set(1024,1024);
+    sun.position.set(5, 10, 8); sun.castShadow = true;
     scene.add(sun);
 
-    // ── Room geometry ─────────────────────────────────────────────────────
+    // ── Room ──────────────────────────────────────────────────────────────
     const wallMat = new THREE.MeshStandardMaterial({
-      color: 0xdfd5ec, transparent: true, opacity: 0.45,
-      roughness: 0.95, side: THREE.DoubleSide
+      color:0xdfd5ec, transparent:true, opacity:0.4, roughness:0.95, side:THREE.DoubleSide
     });
 
     // Floor
-    const floor = new THREE.Mesh(
+    const floorMesh = new THREE.Mesh(
       new THREE.PlaneGeometry(COLS, 1),
-      new THREE.MeshStandardMaterial({ color:0xd4c8f0, roughness:0.9 })
+      new THREE.MeshStandardMaterial({ color:0xd0c4ee, roughness:0.9 })
     );
-    floor.rotation.x = -Math.PI/2;
-    floor.position.set(COLS/2, 0, 0);
-    floor.receiveShadow = true;
-    scene.add(floor);
+    floorMesh.rotation.x = -Math.PI / 2;
+    floorMesh.position.set(COLS / 2, 0, 0);
+    floorMesh.receiveShadow = true;
+    scene.add(floorMesh);
 
-    // Grid lines on floor
-    const lm = new THREE.LineBasicMaterial({ color:0xb0a0d8, transparent:true, opacity:0.5 });
+    // Column dividers on floor
+    const divMat = new THREE.LineBasicMaterial({ color:0xa090cc, transparent:true, opacity:0.5 });
     for (let c = 0; c <= COLS; c++) {
-      const g = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(c, 0.01, 0.5), new THREE.Vector3(c, 0.01, -0.5)
-      ]);
-      scene.add(new THREE.Line(g, lm));
+      scene.add(new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(c, 0.01,  0.5),
+          new THREE.Vector3(c, 0.01, -0.5),
+        ]), divMat
+      ));
     }
 
-    // Back wall
-    const bw = new THREE.Mesh(new THREE.PlaneGeometry(COLS, ROWS+1), wallMat);
-    bw.position.set(COLS/2, ROWS/2, -0.5);
+    // Walls
+    const bw = new THREE.Mesh(new THREE.PlaneGeometry(COLS, ROWS + 1), wallMat);
+    bw.position.set(COLS / 2, ROWS / 2, -0.5);
     scene.add(bw);
 
-    // Left wall
-    const lw = new THREE.Mesh(new THREE.PlaneGeometry(1, ROWS+1), wallMat.clone());
-    lw.rotation.y = Math.PI/2; lw.position.set(0, ROWS/2, 0);
+    const lw = new THREE.Mesh(new THREE.PlaneGeometry(1, ROWS + 1), wallMat.clone());
+    lw.rotation.y = Math.PI / 2; lw.position.set(0, ROWS / 2, 0);
     scene.add(lw);
 
-    // Right wall
-    const rw = new THREE.Mesh(new THREE.PlaneGeometry(1, ROWS+1), wallMat.clone());
-    rw.rotation.y = -Math.PI/2; rw.position.set(COLS, ROWS/2, 0);
+    const rw = new THREE.Mesh(new THREE.PlaneGeometry(1, ROWS + 1), wallMat.clone());
+    rw.rotation.y = -Math.PI / 2; rw.position.set(COLS, ROWS / 2, 0);
     scene.add(rw);
 
-    // Room edge lines
-    const em = new THREE.LineBasicMaterial({ color:0x9080c0, transparent:true, opacity:0.6 });
-    const edges2d = [
-      // floor edges
+    // Room outline edges
+    const em = new THREE.LineBasicMaterial({ color:0x9080c0, transparent:true, opacity:0.55 });
+    [
       [[0,0,-0.5],[COLS,0,-0.5]], [[0,0,0.5],[COLS,0,0.5]],
       [[0,0,-0.5],[0,0,0.5]],     [[COLS,0,-0.5],[COLS,0,0.5]],
-      // ceiling
       [[0,ROWS,-0.5],[COLS,ROWS,-0.5]], [[0,ROWS,0.5],[COLS,ROWS,0.5]],
       [[0,ROWS,-0.5],[0,ROWS,0.5]],     [[COLS,ROWS,-0.5],[COLS,ROWS,0.5]],
-      // verticals
       [[0,0,-0.5],[0,ROWS,-0.5]], [[COLS,0,-0.5],[COLS,ROWS,-0.5]],
-      [[0,0,0.5], [0,ROWS,0.5]], [[COLS,0,0.5],[COLS,ROWS,0.5]],
-    ];
-    edges2d.forEach(([a,b]) => {
-      const g = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(...a), new THREE.Vector3(...b)
-      ]);
-      scene.add(new THREE.Line(g, em));
+      [[0,0,0.5],[0,ROWS,0.5]],   [[COLS,0,0.5],[COLS,ROWS,0.5]],
+    ].forEach(([a,b]) => {
+      scene.add(new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(...a), new THREE.Vector3(...b)]), em
+      ));
     });
 
-    // Danger zone plane (ceiling glow)
+    // Danger plane at ceiling
     const dangerMat = new THREE.MeshBasicMaterial({
       color:0xff3333, transparent:true, opacity:0, side:THREE.DoubleSide
     });
     const dangerPlane = new THREE.Mesh(new THREE.PlaneGeometry(COLS, 1), dangerMat);
-    dangerPlane.rotation.x = -Math.PI/2;
-    dangerPlane.position.set(COLS/2, ROWS - 0.5, 0);
+    dangerPlane.rotation.x = -Math.PI / 2;
+    dangerPlane.position.set(COLS / 2, ROWS - 0.5, 0);
     scene.add(dangerPlane);
 
     // ── GLB loading ───────────────────────────────────────────────────────
     const glbCache = {};
-    const loader = new GLTFLoader();
+    const loader   = new GLTFLoader();
 
     async function loadGLBs() {
       await Promise.all(Object.entries(DEFS).map(([type, def]) =>
@@ -223,13 +198,14 @@
             const obj = gltf.scene;
             const box = new THREE.Box3().setFromObject(obj);
             const sz  = box.getSize(new THREE.Vector3());
-            const s   = 0.82 / Math.max(sz.x / def.w, sz.y / def.h, sz.z);
+            // Scale so the longest dimension fills 88% of its cell footprint
+            const s = 0.88 / Math.max(sz.x / def.w, sz.y / def.h, sz.z);
             obj.scale.setScalar(s);
             obj.position.sub(box.getCenter(new THREE.Vector3()).multiplyScalar(s));
             obj.traverse(c => { if (c.isMesh) c.castShadow = true; });
             glbCache[type] = obj;
             res();
-          }, undefined, () => { res(); });
+          }, undefined, () => res());
         })
       ));
     }
@@ -241,7 +217,7 @@
         g.add(glbCache[type].clone());
       } else {
         g.add(new THREE.Mesh(
-          new THREE.BoxGeometry(def.w * 0.8, def.h * 0.8, 0.8),
+          new THREE.BoxGeometry(def.w * 0.88, def.h * 0.88, 0.88),
           new THREE.MeshStandardMaterial({ color:0x8a6ed6 })
         ));
       }
@@ -249,48 +225,52 @@
     }
 
     function makeCrate(w, h) {
-      const geo   = new THREE.BoxGeometry(w * CELL, h * CELL, CELL);
-      const edges = new THREE.EdgesGeometry(geo);
+      const edges = new THREE.EdgesGeometry(new THREE.BoxGeometry(w, h, 1));
       return new THREE.LineSegments(edges,
-        new THREE.LineBasicMaterial({ color:0xffffff })
+        new THREE.LineBasicMaterial({ color:0xffee44 })   // bright yellow — easy to see
       );
     }
 
-    // ── Game state ────────────────────────────────────────────────────────
-    // grid[row][col] = null | { type, gid }
+    // ── Grid state ────────────────────────────────────────────────────────
     const grid = Array.from({ length:ROWS }, () => new Array(COLS).fill(null));
-    const placed = {};   // gid → THREE.Group in scene
-    let   nextGid = 0;
+    const placed = {};
+    let nextGid = 0;
 
     const placedGrp  = new THREE.Group(); scene.add(placedGrp);
     const fallingGrp = new THREE.Group(); scene.add(fallingGrp);
 
-    let piece    = null;
-    let score    = 0;
-    let level    = 0;
-    let lines    = 0;
-    let gameOn   = false;
-    let fallAcc  = 0;
-    let mouseNX  = 0.5;  // normalized cursor x [0,1]
+    let piece   = null;
+    let score   = 0;
+    let level   = 0;
+    let lines   = 0;
+    let gameOn  = false;
+    let fallAcc = 0;
 
-    // ── Drop-shadow plane (falls with piece) ──────────────────────────────
-    const shadowMatD = new THREE.MeshBasicMaterial({
-      color:0x000000, transparent:true, opacity:0.18,
-      depthWrite:false, side:THREE.DoubleSide
-    });
+    // Mouse → world column via raycasting onto the game plane (z = 0)
+    const raycaster = new THREE.Raycaster();
+    const mouse2    = new THREE.Vector2();
+    let   mouseClientX = innerWidth / 2;
 
-    // ── Landing helpers ───────────────────────────────────────────────────
+    function colFromMouse(def) {
+      mouse2.set((mouseClientX / innerWidth) * 2 - 1, 0);
+      raycaster.setFromCamera(mouse2, cam);
+      const dir  = raycaster.ray.direction;
+      const orig = raycaster.ray.origin;
+      const t    = -orig.z / dir.z;           // intersect z = 0 plane
+      const wx   = orig.x + t * dir.x;        // world X
+      return Math.max(0, Math.min(COLS - def.w, wx - def.w / 2 + 0.5));
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────
     function landRow(col, w) {
       let top = 0;
-      for (let c = col; c < col + w && c < COLS; c++) {
-        for (let r = ROWS - 1; r >= 0; r--) {
+      for (let c = col; c < col + w && c < COLS; c++)
+        for (let r = ROWS - 1; r >= 0; r--)
           if (grid[r][c]) { top = Math.max(top, r + 1); break; }
-        }
-      }
       return top;
     }
 
-    // ── Place piece ───────────────────────────────────────────────────────
+    // ── Place ─────────────────────────────────────────────────────────────
     function placePiece() {
       if (!piece) return;
       const def = DEFS[piece.type];
@@ -304,7 +284,6 @@
         for (let c = col; c < col + def.w; c++)
           if (c < COLS) grid[r][c] = { type:piece.type, gid };
 
-      // Settle 3D mesh
       const g = new THREE.Group();
       g.position.set(col + def.w / 2, row + def.h / 2, 0);
       g.add(makeObjMesh(piece.type));
@@ -321,28 +300,22 @@
       fallingGrp.clear();
       piece = null;
 
-      // Game over if top row occupied
       if (grid[ROWS - 1].some(c => c)) { endGame(); return; }
-
-      setTimeout(spawnPiece, 220);
+      spawnPiece();
     }
 
     function clearRows() {
       let n = 0;
       for (let r = 0; r < ROWS; r++) {
-        if (!grid[r].every(c => c !== null)) continue;
-
-        // Collect gids and wipe them from entire grid
+        if (!grid[r].every(Boolean)) continue;
         const gids = new Set(grid[r].filter(Boolean).map(c => c.gid));
+        // Remove those gids from entire grid
         for (let row2 = 0; row2 < ROWS; row2++)
           for (let col2 = 0; col2 < COLS; col2++)
-            if (grid[row2][col2]?.gid && gids.has(grid[row2][col2].gid))
-              grid[row2][col2] = null;
-
+            if (gids.has(grid[row2][col2]?.gid)) grid[row2][col2] = null;
         gids.forEach(gid => {
           if (placed[gid]) { placedGrp.remove(placed[gid]); delete placed[gid]; }
         });
-
         grid.splice(r, 1);
         grid.push(new Array(COLS).fill(null));
         n++; r--;
@@ -380,11 +353,11 @@
 
       if (landRow(col, def.w) + def.h > ROWS) { endGame(); return; }
 
-      const crate  = makeCrate(def.w, def.h);
+      const crate   = makeCrate(def.w, def.h);
       const objMesh = makeObjMesh(type);
       const shadow  = new THREE.Mesh(
-        new THREE.PlaneGeometry(def.w * 0.9, 1),
-        shadowMatD.clone()
+        new THREE.PlaneGeometry(def.w * 0.88, 1),
+        new THREE.MeshBasicMaterial({ color:0x000000, transparent:true, opacity:0, depthWrite:false, side:THREE.DoubleSide })
       );
       shadow.rotation.x = -Math.PI / 2;
 
@@ -398,12 +371,15 @@
 
     // ── Input ─────────────────────────────────────────────────────────────
     const cursorEl = document.getElementById('cursor');
+
     window.addEventListener('mousemove', e => {
       cursorEl.style.left = e.clientX + 'px';
       cursorEl.style.top  = e.clientY + 'px';
-      mouseNX = e.clientX / innerWidth;
+      mouseClientX = e.clientX;
     });
+
     window.addEventListener('click', () => { if (gameOn && piece) placePiece(); });
+
     window.addEventListener('keydown', e => {
       if (!gameOn || !piece) return;
       const def = DEFS[piece.type];
@@ -461,47 +437,45 @@
 
       if (gameOn && piece) {
         const def = DEFS[piece.type];
-        const lvl = LEVELS[level];
 
-        // Map mouse x → target column
-        const tgt = mouseNX * (COLS - def.w + 1) - 0.5;
-        piece.col += (Math.max(0, Math.min(COLS - def.w, tgt)) - piece.col) * 0.22;
+        // Mouse → column via raycast (accurate in any camera angle)
+        const targetCol = colFromMouse(def);
+        piece.col += (targetCol - piece.col) * 0.3;
 
         // Gravity
         fallAcc += dt * 1000;
-        const interval = lvl.msPerRow / def.fallMult;
-        if (fallAcc >= interval) {
+        const interval = LEVELS[level].msPerRow / def.fallMult;
+        while (fallAcc >= interval) {
           fallAcc -= interval;
           piece.y -= 1;
-          const sc = Math.round(Math.max(0, Math.min(COLS - def.w, piece.col)));
-          if (Math.floor(piece.y) <= landRow(sc, def.w)) {
-            piece.col = sc;
-            placePiece();
-            // piece is null now — skip rest
-          }
         }
 
-        // Update 3D position
-        if (piece) {
-          piece.grp.position.set(piece.col + def.w / 2, piece.y + def.h / 2, 0);
-          piece.objMesh.rotation.y = elapsed * 0.4;
-
-          // Drop shadow at landing row
-          const sc2 = Math.round(Math.max(0, Math.min(COLS - def.w, piece.col)));
-          const lr  = landRow(sc2, def.w);
-          piece.shadow.position.set(0, -(def.h / 2) + lr - piece.y + 0.05, 0);
-          piece.shadow.material.opacity = 0.05 + 0.15 * Math.max(0, 1 - (piece.y - lr) / 8);
+        // Check landing
+        const sc   = Math.round(Math.max(0, Math.min(COLS - def.w, piece.col)));
+        const land = landRow(sc, def.w);
+        if (piece.y <= land) {
+          piece.col = sc;
+          piece.y   = land;
+          placePiece();
+          return;
         }
+
+        // Update position
+        piece.grp.position.set(piece.col + def.w / 2, piece.y + def.h / 2, 0);
+        piece.objMesh.rotation.y = elapsed * 0.4;
+
+        // Drop shadow at landing row
+        piece.shadow.position.set(0, land - piece.y - def.h / 2 + 0.05, 0);
+        piece.shadow.material.opacity = 0.05 + 0.18 * Math.max(0, 1 - (piece.y - land) / 7);
       }
 
       // Ceiling danger pulse
-      const maxH = (() => {
-        for (let r = ROWS - 1; r >= 0; r--)
-          if (grid[r].some(c => c)) return r + 1;
-        return 0;
-      })();
+      let maxH = 0;
+      for (let r = ROWS - 1; r >= 0; r--) {
+        if (grid[r].some(Boolean)) { maxH = r + 1; break; }
+      }
       dangerMat.opacity = maxH > ROWS * 0.65
-        ? 0.06 + 0.1 * (0.5 + 0.5 * Math.sin(elapsed * 6))
+        ? 0.07 + 0.1 * (0.5 + 0.5 * Math.sin(elapsed * 6))
         : 0;
 
       renderer.render(scene, cam);
@@ -509,8 +483,7 @@
 
     // ── Resize ────────────────────────────────────────────────────────────
     window.addEventListener('resize', () => {
-      const a = innerWidth / innerHeight;
-      cam.left = -VIEW * a; cam.right = VIEW * a;
+      cam.aspect = innerWidth / innerHeight;
       cam.updateProjectionMatrix();
       renderer.setSize(innerWidth, innerHeight);
     });
