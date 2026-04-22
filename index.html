@@ -81,6 +81,8 @@
     const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     renderer.setSize(innerWidth, innerHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.NoToneMapping;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -89,17 +91,16 @@
     cam.position.z = 10;
 
     // ── Lights ────────────────────────────────────────────────────────────
-    scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+    // High ambient so all faces read true to source colour, soft directional for faint depth
+    scene.add(new THREE.AmbientLight(0xffffff, 3.0));
 
-    const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+    const sun = new THREE.DirectionalLight(0xffffff, 0.4);
     sun.position.set(5, 8, 6);
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);
     sun.shadow.camera.near = 0.5;
     sun.shadow.camera.far = 30;
     scene.add(sun);
-
-    scene.add(new THREE.HemisphereLight(0xffffff, 0xffffff, 0.6));
 
     const gnd = new THREE.Mesh(
       new THREE.PlaneGeometry(50, 50),
