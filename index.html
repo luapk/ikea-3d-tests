@@ -99,7 +99,7 @@
     sun.shadow.camera.far = 30;
     scene.add(sun);
 
-    scene.add(new THREE.HemisphereLight(T.hi, T.lo, 0.5));
+    scene.add(new THREE.HemisphereLight(0xffffff, 0xffffff, 0.6));
 
     const gnd = new THREE.Mesh(
       new THREE.PlaneGeometry(50, 50),
@@ -158,7 +158,7 @@
     const N   = FILES.length;
     const K   = [15, 11, 8, 6, 4.5];   // spring stiffness per node (first = most responsive)
     const DAMP_K = 6;                   // velocity damping coefficient
-    const SEP    = 1.35;               // minimum separation between nodes (world units)
+    const SEP    = 0.7;                // minimum separation between nodes (world units)
 
     const nodePos = Array.from({ length: N }, (_, i) =>
       new THREE.Vector3(i * -1.5, 0, 0));
@@ -172,55 +172,22 @@
       return g;
     });
 
-    function makeMat() {
-      return new THREE.MeshPhongMaterial({
-        color:    new THREE.Color(T.obj),
-        specular: new THREE.Color(T.spec),
-        shininess: 28,
-        flatShading: true,
-      });
-    }
-
-    function normaliseAndMaterial(obj) {
+    function normalise(obj) {
       const box = new THREE.Box3().setFromObject(obj);
       const sz  = box.getSize(new THREE.Vector3());
       const s   = 1.15 / Math.max(sz.x, sz.y, sz.z);
       obj.scale.setScalar(s);
       const ctr = box.getCenter(new THREE.Vector3()).multiplyScalar(s);
       obj.position.sub(ctr);
-      obj.traverse(c => {
-        if (c.isMesh) {
-          c.castShadow = true;
-          c.material = makeMat();
-        }
-      });
+      obj.traverse(c => { if (c.isMesh) c.castShadow = true; });
     }
-
-    // Fallback geometry set (used if a GLB fails to load)
-    const FB = [
-      new THREE.BoxGeometry(0.9, 0.9, 0.9),
-      new THREE.SphereGeometry(0.55, 7, 5),
-      new THREE.ConeGeometry(0.5, 1.0, 7),
-      new THREE.TorusGeometry(0.4, 0.18, 7, 14),
-      new THREE.OctahedronGeometry(0.62, 0),
-    ];
 
     const loader = new GLTFLoader();
     FILES.forEach((file, i) => {
-      loader.load(
-        `./objects/${file}`,
-        gltf => {
-          normaliseAndMaterial(gltf.scene);
-          pivots[i].add(gltf.scene);
-        },
-        undefined,
-        () => {
-          // Fallback: flat-shaded primitive in theme colour
-          const m = new THREE.Mesh(FB[i % FB.length], makeMat());
-          m.castShadow = true;
-          pivots[i].add(m);
-        }
-      );
+      loader.load(`./objects/${file}`, gltf => {
+        normalise(gltf.scene);
+        pivots[i].add(gltf.scene);
+      });
     });
 
     // ── Resize ────────────────────────────────────────────────────────────
