@@ -3,15 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ikea formations</title>
+  <title>ikea room</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; height: 100%; overflow: hidden; }
     body { font-family: 'Segoe UI', Tahoma, sans-serif; }
-
     #bg { position: fixed; inset: 0; z-index: 0; }
     #c  { position: fixed; inset: 0; z-index: 1; }
-
     .badge {
       position: fixed; z-index: 10;
       background: #fff; color: #000;
@@ -19,29 +17,19 @@
       padding: 0.15em 0.5em;
       box-shadow: 0 4px 6px rgba(0,0,0,0.10);
       text-transform: lowercase; line-height: 1.1;
-      letter-spacing: -0.01em;
-      font-size: 1.15em;
+      letter-spacing: -0.01em; font-size: 1.15em;
       user-select: none; pointer-events: none;
       transition: opacity 0.26s ease, transform 0.26s ease;
     }
-    #badge-formation {
-      bottom: 3.8em; left: 1.8em;
-    }
-    #badge-hint {
-      bottom: 1.8em; left: 1.8em;
-      opacity: 0.55;
-    }
-    .badge-enter {
-      opacity: 0;
-      transform: translateY(6px);
-    }
+    #badge-state { bottom: 3.8em; left: 1.8em; }
+    #badge-hint  { bottom: 1.8em; left: 1.8em; opacity: 0.55; }
   </style>
 </head>
 <body>
   <div id="bg"></div>
   <canvas id="c"></canvas>
-  <div class="badge" id="badge-formation">grid</div>
-  <div class="badge" id="badge-hint">press space to rearrange</div>
+  <div class="badge" id="badge-state">floating</div>
+  <div class="badge" id="badge-hint">press space</div>
 
   <script type="importmap">
   { "imports": {
@@ -54,16 +42,14 @@
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
     import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
+    const PI = Math.PI;
+
     // ── Themes ────────────────────────────────────────────────────────────
     const THEMES = [
-      {
-        bgBase: '#cfe7f7',
-        bgA: '#e5f3fa', bgB: '#b1def7', bgC: '#96c2ec',
-      },
-      {
-        bgBase: '#c9bff0',
-        bgA: '#dfd5ec', bgB: '#d9afdb', bgC: '#a49af2',
-      },
+      { bgBase: '#cfe7f7', bgA: '#e5f3fa', bgB: '#b1def7', bgC: '#96c2ec',
+        gridC: 0x7ab8e8, wallC: 0x4a90c4 },
+      { bgBase: '#c9bff0', bgA: '#dfd5ec', bgB: '#d9afdb', bgC: '#a49af2',
+        gridC: 0x9988dd, wallC: 0x6655bb },
     ];
     const T = THEMES[Math.random() < 0.5 ? 0 : 1];
 
@@ -82,229 +68,171 @@
     renderer.toneMapping = THREE.NoToneMapping;
 
     const scene = new THREE.Scene();
-    const cam = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 100);
-    cam.position.set(0, 2, 14);
-    cam.lookAt(0, 0, 0);
+    const cam = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 100);
+    cam.position.set(0, 9, 13);
+    cam.lookAt(0, 0, -1);
 
-    // ── Environment (IBL) ─────────────────────────────────────────────────
+    // ── IBL ───────────────────────────────────────────────────────────────
     const pmrem = new THREE.PMREMGenerator(renderer);
     scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
     pmrem.dispose();
 
-    // ── Formations ────────────────────────────────────────────────────────
+    // ── Room geometry ─────────────────────────────────────────────────────
+    const RW = 8, RD = 6, WH = 3;
+    const hw = RW / 2, hd = RD / 2;
+
+    // Floor grid
+    {
+      const pts = [];
+      for (let i = 0; i <= RW; i++) { const x = -hw + i; pts.push(x,0,-hd, x,0,hd); }
+      for (let j = 0; j <= RD; j++) { const z = -hd + j; pts.push(-hw,0,z, hw,0,z); }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+      scene.add(new THREE.LineSegments(geo,
+        new THREE.LineBasicMaterial({ color: T.gridC, opacity: 0.3, transparent: true })));
+    }
+
+    // Wall wireframe (back, left, right — open front)
+    {
+      const pts = [
+        -hw,0,-hd,  hw,0,-hd,   -hw,WH,-hd,  hw,WH,-hd,
+        -hw,0,-hd, -hw,WH,-hd,   hw,0,-hd,   hw,WH,-hd,
+        -hw,0,-hd, -hw,0,hd,   -hw,WH,-hd,  -hw,WH,hd,  -hw,0,hd, -hw,WH,hd,
+         hw,0,-hd,  hw,0,hd,    hw,WH,-hd,   hw,WH,hd,   hw,0,hd,  hw,WH,hd,
+        -hw,0,hd,   hw,0,hd,
+      ];
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+      scene.add(new THREE.LineSegments(geo,
+        new THREE.LineBasicMaterial({ color: T.wallC, opacity: 0.45, transparent: true })));
+    }
+
+    // ── Layouts ───────────────────────────────────────────────────────────
+    const LAYOUTS = [
+      {
+        name: 'storage',
+        slots: [
+          { x:-2.5, z:-2.5, ry:0        }, { x:0,    z:-2.5, ry:0       }, { x:2.5,  z:-2.5, ry:0        },
+          { x:-3.5, z:-1.5, ry: PI/2    }, { x:-3.5, z:0.5,  ry: PI/2   },
+          { x: 3.5, z:-1.5, ry:-PI/2    }, { x: 3.5, z:0.5,  ry:-PI/2   },
+          { x:-1.5, z:2,    ry: PI      }, { x:1.5,  z:2,    ry: PI      },
+        ],
+      },
+      {
+        name: 'studio',
+        slots: [
+          { x:-3,   z:-2.5, ry:0        }, { x:-1,   z:-2.5, ry:0       }, { x:1,    z:-2.5, ry:0        }, { x:3,   z:-2.5, ry:0      },
+          { x: 3.5, z:-1,   ry:-PI/2    }, { x: 3.5, z:1,    ry:-PI/2   },
+          { x:-1.5, z:-0.5, ry: PI/5    }, { x:0.5,  z:0.5,  ry:0       },
+          { x:-1,   z:2,    ry: PI      },
+        ],
+      },
+      {
+        name: 'showcase',
+        slots: [
+          { x:-3.5, z:-2.5, ry: PI/4    }, { x:0,    z:-2.5, ry:0       }, { x:3.5,  z:-2.5, ry:-PI/4    },
+          { x:-3.5, z:0,    ry: PI/2    }, { x:3.5,  z:0,    ry:-PI/2   },
+          { x:-2,   z:2.2,  ry: PI/6    }, { x:0,    z:2.5,  ry: PI     }, { x:2,    z:2.2,  ry:-PI/6    },
+          { x:0,    z:-0.5, ry:0        },
+        ],
+      },
+      {
+        name: 'office',
+        slots: [
+          { x:-3,   z:-2.5, ry:0        }, { x:-1,   z:-2.5, ry:0       }, { x:1,    z:-2.5, ry:0        }, { x:3,   z:-2.5, ry:0      },
+          { x:-3.5, z:-1,   ry: PI/2    }, { x:-3.5, z:1,    ry: PI/2   },
+          { x: 3.5, z:-1,   ry:-PI/2    },
+          { x:1,    z:0.5,  ry: PI      }, { x:-0.5, z:1.8,  ry: PI/3   },
+        ],
+      },
+    ];
+
+    // ── Float positions ───────────────────────────────────────────────────
+    const FLOAT_POS = [
+      new THREE.Vector3(-3,   4.0, -1  ),
+      new THREE.Vector3( 0,   4.2,  0  ),
+      new THREE.Vector3( 3,   4.0,  1  ),
+      new THREE.Vector3(-2,   3.4, -0.5),
+      new THREE.Vector3( 2,   3.7,  0.5),
+      new THREE.Vector3(-1,   3.9,  1  ),
+      new THREE.Vector3( 1.5, 3.3, -1  ),
+      new THREE.Vector3(-3.5, 3.7,  0.5),
+      new THREE.Vector3( 3.2, 3.5, -0.5),
+    ];
+
+    // ── Objects ───────────────────────────────────────────────────────────
     const N = 9;
-
-    // Returns array of N {x, y} positions in world units
-    const FORMATIONS = [
-      {
-        name: 'grid',
-        positions() {
-          const cols = 3, rows = 3, sx = 3.2, sy = 3.0;
-          return Array.from({ length: N }, (_, i) => ({
-            x: (i % cols - 1) * sx,
-            y: (Math.floor(i / cols) - 1) * -sy,
-          }));
-        },
-      },
-      {
-        name: 'circle',
-        positions() {
-          return Array.from({ length: N }, (_, i) => {
-            const a = (i / N) * Math.PI * 2 - Math.PI / 2;
-            return { x: Math.cos(a) * 4.8, y: Math.sin(a) * 3.2 };
-          });
-        },
-      },
-      {
-        name: 'arc',
-        positions() {
-          return Array.from({ length: N }, (_, i) => {
-            const t = (i / (N - 1)) * Math.PI;
-            return { x: (i - (N - 1) / 2) * 1.55, y: Math.sin(t) * 2.8 - 1.4 };
-          });
-        },
-      },
-      {
-        name: 'diamond',
-        positions() {
-          const pts = [
-            [0, 3.2],
-            [-2.2, 1.6], [2.2, 1.6],
-            [-4.0, 0],   [0, 0],    [4.0, 0],
-            [-2.2,-1.6], [2.2,-1.6],
-            [0,-3.2],
-          ];
-          return pts.map(([x, y]) => ({ x, y }));
-        },
-      },
-      {
-        name: 'cross',
-        positions() {
-          return [
-            { x:  0,    y:  3.2 },
-            { x:  0,    y:  1.6 },
-            { x:  0,    y:  0   },
-            { x:  0,    y: -1.6 },
-            { x:  0,    y: -3.2 },
-            { x: -3.2,  y:  0   },
-            { x: -1.6,  y:  0   },
-            { x:  1.6,  y:  0   },
-            { x:  3.2,  y:  0   },
-          ];
-        },
-      },
-      {
-        name: 'spiral',
-        positions() {
-          return Array.from({ length: N }, (_, i) => {
-            const a = i * 0.85;
-            const r = 0.9 + i * 0.52;
-            return { x: Math.cos(a) * r, y: Math.sin(a) * r * 0.65 };
-          });
-        },
-      },
-      {
-        name: 'staggered',
-        positions() {
-          return Array.from({ length: N }, (_, i) => {
-            const col = i % 3;
-            const row = Math.floor(i / 3);
-            return {
-              x: (col - 1) * 3.4 + (row % 2 === 1 ? 1.7 : 0),
-              y: (row - 1) * -2.8,
-            };
-          });
-        },
-      },
-      {
-        name: 'line',
-        positions() {
-          return Array.from({ length: N }, (_, i) => ({
-            x: (i - (N - 1) / 2) * 1.55,
-            y: 0,
-          }));
-        },
-      },
-      {
-        name: 'v-shape',
-        positions() {
-          return Array.from({ length: N }, (_, i) => {
-            const mid = (N - 1) / 2;
-            const dist = Math.abs(i - mid);
-            return {
-              x: (i - mid) * 1.6,
-              y: -dist * 1.3 + 2.6,
-            };
-          });
-        },
-      },
-    ];
-
-    let formationIdx = 0;
-    let targets = FORMATIONS[0].positions();
-
-    // ── GLB Loading ───────────────────────────────────────────────────────
     const FILES = [
-      'commode_ikea_hemnes.glb',
-      'ikea_alex_drawer_unit.glb',
-      'ikea_billy_small.glb',
-      'ikea_hemnes_dresser.glb',
-      'ikea_kallax.glb',
-      'ikea_kallax_77x77.glb',
-      'ikea_kallx147x147.glb',
-      'kuggis_series_box_-_ikea.glb',
-      'tobias_chair_ikea.glb',
+      'commode_ikea_hemnes.glb', 'ikea_alex_drawer_unit.glb', 'ikea_billy_small.glb',
+      'ikea_hemnes_dresser.glb', 'ikea_kallax.glb',           'ikea_kallax_77x77.glb',
+      'ikea_kallx147x147.glb',  'kuggis_series_box_-_ikea.glb','tobias_chair_ikea.glb',
     ];
 
-    const pivots = Array.from({ length: N }, () => {
-      const g = new THREE.Group();
-      scene.add(g);
-      return g;
-    });
-
-    // Per-object spring state
-    const curPos  = Array.from({ length: N }, () => new THREE.Vector2());
-    const curVel  = Array.from({ length: N }, () => new THREE.Vector2());
-    const rotY    = new Float32Array(N);
-    const rotYVel = new Float32Array(N);
-
-    const loaded = new Array(N).fill(false);
+    const pivots   = Array.from({ length: N }, () => { const g = new THREE.Group(); scene.add(g); return g; });
+    const groundY  = new Float32Array(N);
+    const loaded   = new Array(N).fill(false);
 
     function normalise(obj) {
       const box = new THREE.Box3().setFromObject(obj);
       const sz  = box.getSize(new THREE.Vector3());
-      const s   = 1.5 / Math.max(sz.x, sz.y, sz.z);
+      const s   = 1.4 / Math.max(sz.x, sz.y, sz.z);
       obj.scale.setScalar(s);
       const ctr = box.getCenter(new THREE.Vector3()).multiplyScalar(s);
       obj.position.sub(ctr);
       obj.traverse(c => { if (c.isMesh) c.castShadow = true; });
+      const box2 = new THREE.Box3().setFromObject(obj);
+      return -box2.min.y;
     }
 
     const loader = new GLTFLoader();
     FILES.forEach((file, i) => {
       loader.load(`./furniture/${file}`, gltf => {
-        normalise(gltf.scene);
+        groundY[i] = normalise(gltf.scene);
         pivots[i].add(gltf.scene);
-        // Scatter start positions off-screen, then spring to formation
-        curPos[i].set((Math.random() - 0.5) * 20, (Math.random() - 0.5) * 12);
+        pivots[i].position.copy(FLOAT_POS[i]);
         loaded[i] = true;
       });
     });
 
-    // ── Space → next formation ────────────────────────────────────────────
-    const badgeFormation = document.getElementById('badge-formation');
+    // ── State ─────────────────────────────────────────────────────────────
+    let appState = 'floating';
+    let layoutIdx = -1;
+    let assignedSlot = Array.from({ length: N }, (_, i) => i);
 
-    function nextFormation() {
-      formationIdx = (formationIdx + 1) % FORMATIONS.length;
-      const f = FORMATIONS[formationIdx];
-      targets = f.positions();
+    const curPos = Array.from({ length: N }, (_, i) => new THREE.Vector3().copy(FLOAT_POS[i]));
+    const curVel = Array.from({ length: N }, () => new THREE.Vector3());
+    const curRY  = new Float32Array(N);
+    const curRYv = new Float32Array(N);
 
-      // Shuffle which object goes to which slot for variety
-      const order = Array.from({ length: N }, (_, i) => i);
-      for (let i = N - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [order[i], order[j]] = [order[j], order[i]];
-      }
-      const shuffledTargets = order.map(o => targets[o]);
-      targets = shuffledTargets;
-
-      // Staggered velocity kick toward new target for each object
-      targets.forEach((tgt, i) => {
-        setTimeout(() => {
-          const dx = tgt.x - curPos[i].x;
-          const dy = tgt.y - curPos[i].y;
-          curVel[i].x += dx * 0.25;
-          curVel[i].y += dy * 0.25;
-        }, i * 40);
-      });
-
-      // Badge transition
-      badgeFormation.classList.add('badge-enter');
-      requestAnimationFrame(() => {
-        badgeFormation.style.opacity = '0';
-        badgeFormation.style.transform = 'translateY(6px)';
-        setTimeout(() => {
-          badgeFormation.textContent = f.name;
-          badgeFormation.style.opacity = '';
-          badgeFormation.style.transform = '';
-          badgeFormation.classList.remove('badge-enter');
-        }, 130);
-      });
+    const badgeEl = document.getElementById('badge-state');
+    function swapBadge(text) {
+      badgeEl.style.opacity = '0';
+      badgeEl.style.transform = 'translateY(6px)';
+      setTimeout(() => {
+        badgeEl.textContent = text;
+        badgeEl.style.opacity = '';
+        badgeEl.style.transform = '';
+      }, 130);
     }
 
-    window.addEventListener('keydown', e => {
-      if (e.code === 'Space') {
-        e.preventDefault();
-        nextFormation();
+    function handleSpace() {
+      if (appState === 'floating') {
+        layoutIdx = (layoutIdx + 1) % LAYOUTS.length;
+        assignedSlot = Array.from({ length: N }, (_, i) => i);
+        for (let i = N - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [assignedSlot[i], assignedSlot[j]] = [assignedSlot[j], assignedSlot[i]];
+        }
+        appState = 'grounded';
+        swapBadge(LAYOUTS[layoutIdx].name);
+      } else {
+        appState = 'floating';
+        swapBadge('floating');
       }
-    });
+    }
 
-    // Tap anywhere on mobile
-    window.addEventListener('touchend', e => {
-      if (e.changedTouches.length > 0) nextFormation();
-    });
-
-    // ── Resize ────────────────────────────────────────────────────────────
+    window.addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); handleSpace(); } });
+    window.addEventListener('touchend', e => { if (e.changedTouches.length > 0) handleSpace(); });
     window.addEventListener('resize', () => {
       cam.aspect = innerWidth / innerHeight;
       cam.updateProjectionMatrix();
@@ -312,62 +240,58 @@
     });
 
     // ── Render loop ───────────────────────────────────────────────────────
-    const SPRING_K  = 5.5;
-    const DAMP      = 5.0;
-    const ROT_K     = 2.2;
-    const ROT_DAMP  = 3.5;
-
-    let prevT = performance.now();
-    let elapsed = 0;
+    const SK = 5.5, SD = 5, RK = 4.5, RD2 = 4;
+    let prevT = performance.now(), elapsed = 0;
 
     (function tick(now) {
       requestAnimationFrame(tick);
-
       const dt = Math.min((now - prevT) / 1000, 0.05);
-      prevT = now;
-      elapsed += dt;
+      prevT = now; elapsed += dt;
 
-      const damp = Math.exp(-DAMP * dt);
-      const rotDamp = Math.exp(-ROT_DAMP * dt);
+      const dF  = Math.exp(-SD  * dt);
+      const rdF = Math.exp(-RD2 * dt);
 
       for (let i = 0; i < N; i++) {
         if (!loaded[i]) continue;
 
-        // Spring toward target
-        const tgt = targets[i];
-        const ax = (tgt.x - curPos[i].x) * SPRING_K;
-        const ay = (tgt.y - curPos[i].y) * SPRING_K;
+        // Target position
+        let tx, ty, tz;
+        if (appState === 'floating') {
+          tx = FLOAT_POS[i].x + Math.cos(elapsed * 0.75 + i * 0.7) * 0.07;
+          ty = FLOAT_POS[i].y + Math.sin(elapsed * 1.0  + i * 0.9) * 0.13;
+          tz = FLOAT_POS[i].z;
+        } else {
+          const sl = LAYOUTS[layoutIdx].slots[assignedSlot[i]];
+          tx = sl.x; ty = groundY[i]; tz = sl.z;
+        }
 
-        curVel[i].x = (curVel[i].x + ax * dt) * damp;
-        curVel[i].y = (curVel[i].y + ay * dt) * damp;
+        // Spring position
+        curVel[i].x = (curVel[i].x + (tx - curPos[i].x) * SK * dt) * dF;
+        curVel[i].y = (curVel[i].y + (ty - curPos[i].y) * SK * dt) * dF;
+        curVel[i].z = (curVel[i].z + (tz - curPos[i].z) * SK * dt) * dF;
         curPos[i].x += curVel[i].x * dt;
         curPos[i].y += curVel[i].y * dt;
+        curPos[i].z += curVel[i].z * dt;
+        pivots[i].position.copy(curPos[i]);
 
-        // Gentle idle wobble
-        const wobX = Math.cos(elapsed * 0.9 + i * 0.7) * 0.04;
-        const wobY = Math.sin(elapsed * 1.1 + i * 1.1) * 0.06;
+        // Rotation
+        if (appState === 'floating') {
+          curRY[i] += (0.32 + i * 0.015) * dt;
+          pivots[i].rotation.y = curRY[i];
+          pivots[i].rotation.x += (THREE.MathUtils.clamp(-curVel[i].z * 0.05, -0.2, 0.2) - pivots[i].rotation.x) * 0.1;
+          pivots[i].rotation.z += (THREE.MathUtils.clamp(-curVel[i].x * 0.05, -0.2, 0.2) - pivots[i].rotation.z) * 0.1;
+        } else {
+          const targetRY = LAYOUTS[layoutIdx].slots[assignedSlot[i]].ry;
+          let diff = targetRY - curRY[i];
+          diff = ((diff + PI) % (2 * PI) + 2 * PI) % (2 * PI) - PI;
+          curRYv[i] = (curRYv[i] + diff * RK * dt) * rdF;
+          curRY[i] += curRYv[i] * dt;
+          pivots[i].rotation.y = curRY[i];
+          pivots[i].rotation.x += (0 - pivots[i].rotation.x) * 0.08;
+          pivots[i].rotation.z += (0 - pivots[i].rotation.z) * 0.08;
+        }
 
-        pivots[i].position.set(
-          curPos[i].x + wobX,
-          curPos[i].y + wobY,
-          -i * 0.08
-        );
-
-        // Slow continuous Y rotation + spring toward upright on X/Z tilt
-        const targetRotY = elapsed * 0.3 + i * (Math.PI * 2 / N);
-        rotYVel[i] = (rotYVel[i] + (targetRotY - rotY[i]) * ROT_K * dt) * rotDamp;
-        rotY[i] += rotYVel[i] * dt;
-
-        const speed = Math.sqrt(curVel[i].x ** 2 + curVel[i].y ** 2);
-        const rx = THREE.MathUtils.clamp(-curVel[i].y * 0.06, -0.3, 0.3);
-        const rz = THREE.MathUtils.clamp(-curVel[i].x * 0.06, -0.3, 0.3);
-
-        pivots[i].rotation.x += (rx - pivots[i].rotation.x) * 0.12;
-        pivots[i].rotation.y = elapsed * 0.3 + i * (Math.PI * 2 / N);
-        pivots[i].rotation.z += (rz - pivots[i].rotation.z) * 0.12;
-
-        // Scale pulse on movement
-        pivots[i].scale.setScalar(1 + Math.min(speed * 0.018, 0.1));
+        pivots[i].scale.setScalar(1 + Math.min(curVel[i].length() * 0.012, 0.07));
       }
 
       renderer.render(scene, cam);
